@@ -1,1 +1,2 @@
+auth [success=done default=ignore] pam_fprintd.so
 auth include login

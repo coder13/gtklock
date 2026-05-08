@@ -112,6 +112,13 @@ static gboolean signal_handler(gpointer data) {
 	return FALSE;
 }
 
+static gboolean fingerprint_unlock_handler(gpointer data) {
+	struct GtkLock *gtklock = data;
+	if(gtklock->focused_window != NULL)
+		window_pw_check(NULL, gtklock->focused_window);
+	return G_SOURCE_REMOVE;
+}
+
 static void locked(GtkSessionLockLock *lock, void *data) {
 	struct GtkLock *gtklock = (struct GtkLock *)data;
 
@@ -120,6 +127,7 @@ static void locked(GtkSessionLockLock *lock, void *data) {
 	module_on_locked(gtklock);
 	if(gtklock->parent > 0) kill(gtklock->parent, SIGUSR2);
 	if(gtklock->lock_command) exec_command(gtklock->lock_command);
+	g_idle_add(fingerprint_unlock_handler, gtklock);
 	return;
 }
 
@@ -168,4 +176,3 @@ void gtklock_shutdown(struct GtkLock *gtklock) {
 
 	if(gtklock->unlock_command) exec_command(gtklock->unlock_command);
 }
-

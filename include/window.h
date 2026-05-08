@@ -40,4 +40,4 @@ void window_idle_show(struct Window *win);
 void window_update_clock(struct Window *ctx);
 void window_update_date(struct Window *ctx);
 void window_swap_focus(struct Window *win, struct Window *old);
-
+void window_pw_check(GtkWidget *widget, gpointer data);
