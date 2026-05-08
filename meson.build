@@ -57,5 +57,7 @@ executable(
 
 install_data(
   'pam/gtklock',
+  'pam/gtklock-fingerprint',
+  'pam/gtklock-password',
   install_dir : get_option('sysconfdir') / 'pam.d'
 )

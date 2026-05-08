@@ -132,7 +132,7 @@ static gboolean fingerprint_unlock_handler(gpointer data) {
 		return G_SOURCE_CONTINUE;
 
 	if(gtklock->focused_window != NULL)
-		window_pw_check(NULL, gtklock->focused_window);
+		window_fingerprint_check(gtklock->focused_window);
 	return G_SOURCE_REMOVE;
 }
 

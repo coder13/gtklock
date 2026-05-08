@@ -20,17 +20,43 @@ struct conv_data {
 	int *out;
 };
 
-static char *error_string = NULL;
-static char *message_string = NULL;
+static struct auth_session default_session = { .pid = -2 };
 
 char *auth_get_error(void) {
-	char *s = error_string;
-	error_string = NULL;
-	return s;
+	return auth_session_get_error(&default_session);
 }
 char *auth_get_message(void) {
-	char *s = message_string;
-	message_string = NULL;
+	return auth_session_get_message(&default_session);
+}
+
+void auth_session_init(struct auth_session *session) {
+	session->pid = -2;
+	session->error_string = NULL;
+	session->message_string = NULL;
+}
+
+void auth_session_free(struct auth_session *session) {
+	if(session->error_string) free(session->error_string);
+	if(session->message_string) free(session->message_string);
+	session->error_string = NULL;
+	session->message_string = NULL;
+
+	if(session->pid >= 0) {
+		close(session->err_pipe[PIPE_PARENT]);
+		close(session->out_pipe[PIPE_PARENT]);
+	}
+	session->pid = -2;
+}
+
+char *auth_session_get_error(struct auth_session *session) {
+	char *s = session->error_string;
+	session->error_string = NULL;
+	return s;
+}
+
+char *auth_session_get_message(struct auth_session *session) {
+	char *s = session->message_string;
+	session->message_string = NULL;
 	return s;
 }
 
@@ -75,7 +101,7 @@ static int conversation(
 	return PAM_SUCCESS;
 }
 
-static void auth_child(const char *s, int *err, int *out) {
+static void auth_child(const char *service, const char *s, int *err, int *out) {
 	struct passwd *pwd = NULL;
 
 	errno = 0;
@@ -90,7 +116,7 @@ static void auth_child(const char *s, int *err, int *out) {
 	struct pam_handle *handle;
 	struct conv_data data = { .pw = s, .err = err, .out = out };
 	struct pam_conv conv = { conversation, (void *)&data };
-	pam_status = pam_start("gtklock", username, &conv, &handle);
+	pam_status = pam_start(service, username, &conv, &handle);
 	if(pam_status != PAM_SUCCESS) {
 		fprintf(stderr, "pam_start() failed");
 		exit(EXIT_FAILURE);
@@ -105,69 +131,70 @@ static void auth_child(const char *s, int *err, int *out) {
 	exit(EXIT_FAILURE);
 }
 
-enum pwcheck auth_pw_check(const char *s) {
-	static pipe_t err_pipe;
-	static pipe_t out_pipe;
-	static pid_t pid = -2;
-
-	if(pid < 0) {
-		if(pipe(err_pipe) != 0) {
+enum pwcheck auth_session_check(struct auth_session *session, const char *service, const char *s) {
+	if(session->pid < 0) {
+		if(pipe(session->err_pipe) != 0) {
 			g_warning("err pipe failure");
 			return PW_WAIT;
 		}
-		if(pipe(out_pipe) != 0) {
-			close(err_pipe[PIPE_PARENT]);
-			close(err_pipe[PIPE_CHILD]);
+		if(pipe(session->out_pipe) != 0) {
+			close(session->err_pipe[PIPE_PARENT]);
+			close(session->err_pipe[PIPE_CHILD]);
 			g_warning("out pipe failure");
 			return PW_WAIT;
 		}
-		pid = fork();
-		if(pid == -1) {
-			close(err_pipe[PIPE_PARENT]);
-			close(err_pipe[PIPE_CHILD]);
-			close(out_pipe[PIPE_PARENT]);
-			close(out_pipe[PIPE_CHILD]);
+		session->pid = fork();
+		if(session->pid == -1) {
+			close(session->err_pipe[PIPE_PARENT]);
+			close(session->err_pipe[PIPE_CHILD]);
+			close(session->out_pipe[PIPE_PARENT]);
+			close(session->out_pipe[PIPE_CHILD]);
 			g_warning("fork failure");
 			return PW_WAIT;
 		}
-		else if(pid == 0) {
-			close(err_pipe[PIPE_PARENT]);
-			close(out_pipe[PIPE_PARENT]);
+		else if(session->pid == 0) {
+			close(session->err_pipe[PIPE_PARENT]);
+			close(session->out_pipe[PIPE_PARENT]);
 			freopen("/dev/null", "r", stdin);
-			auth_child(s, err_pipe, out_pipe);
+			auth_child(service, s, session->err_pipe, session->out_pipe);
 		}
-		close(err_pipe[PIPE_CHILD]);
-		close(out_pipe[PIPE_CHILD]);
-		fcntl(err_pipe[PIPE_PARENT], F_SETFL, O_NONBLOCK);
-		fcntl(out_pipe[PIPE_PARENT], F_SETFL, O_NONBLOCK);
+		close(session->err_pipe[PIPE_CHILD]);
+		close(session->out_pipe[PIPE_CHILD]);
+		fcntl(session->err_pipe[PIPE_PARENT], F_SETFL, O_NONBLOCK);
+		fcntl(session->out_pipe[PIPE_PARENT], F_SETFL, O_NONBLOCK);
 	}
 
-	if(error_string) free(error_string);
-	if(message_string) free(message_string);
+	if(session->error_string) free(session->error_string);
+	if(session->message_string) free(session->message_string);
 
 	size_t len;
 	ssize_t nread;
-	nread = read(err_pipe[PIPE_PARENT], &len, sizeof(size_t));
+	nread = read(session->err_pipe[PIPE_PARENT], &len, sizeof(size_t));
 	if(nread > 0 && len <= PAM_MAX_MSG_SIZE) {
-		error_string = malloc(PAM_MAX_MSG_SIZE);
-		nread = read(err_pipe[PIPE_PARENT], error_string, len);
-		error_string[nread] = '\0';
+		session->error_string = malloc(PAM_MAX_MSG_SIZE);
+		nread = read(session->err_pipe[PIPE_PARENT], session->error_string, len);
+		session->error_string[nread] = '\0';
 		return PW_ERROR;
 	}
-	nread = read(out_pipe[PIPE_PARENT], &len, sizeof(size_t));
+	nread = read(session->out_pipe[PIPE_PARENT], &len, sizeof(size_t));
 	if(nread > 0 && len <= PAM_MAX_MSG_SIZE) {
-		message_string = malloc(PAM_MAX_MSG_SIZE);
-		nread = read(out_pipe[PIPE_PARENT], message_string, len);
-		message_string[nread] = '\0';
+		session->message_string = malloc(PAM_MAX_MSG_SIZE);
+		nread = read(session->out_pipe[PIPE_PARENT], session->message_string, len);
+		session->message_string[nread] = '\0';
 		return PW_MESSAGE;
 	}
 
 	int status;
-	if(waitpid(pid, &status, WNOHANG) != 0 && WIFEXITED(status)) {
-		pid = -2;
+	if(waitpid(session->pid, &status, WNOHANG) > 0 && WIFEXITED(status)) {
+		close(session->err_pipe[PIPE_PARENT]);
+		close(session->out_pipe[PIPE_PARENT]);
+		session->pid = -2;
 		if(WEXITSTATUS(status) == EXIT_SUCCESS) return PW_SUCCESS;
 		else return PW_FAILURE;
 	}
 	return PW_WAIT;
 }
 
+enum pwcheck auth_pw_check(const char *s) {
+	return auth_session_check(&default_session, "gtklock", s);
+}
