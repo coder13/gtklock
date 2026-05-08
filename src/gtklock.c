@@ -127,7 +127,8 @@ static void locked(GtkSessionLockLock *lock, void *data) {
 	module_on_locked(gtklock);
 	if(gtklock->parent > 0) kill(gtklock->parent, SIGUSR2);
 	if(gtklock->lock_command) exec_command(gtklock->lock_command);
-	g_idle_add(fingerprint_unlock_handler, gtklock);
+	if(g_getenv("GTKLOCK_DISABLE_AUTO_AUTH") == NULL)
+		g_idle_add(fingerprint_unlock_handler, gtklock);
 	return;
 }
 
