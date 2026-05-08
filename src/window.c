@@ -22,6 +22,7 @@ struct AuthRequest {
 	char *password;
 	const char *service;
 	gboolean interactive;
+	guint retries_remaining;
 };
 
 struct Window *window_by_widget(GtkWidget *window) {
@@ -153,6 +154,9 @@ static gboolean window_pw_message(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+static gboolean window_fingerprint_retry(gpointer data);
+static gboolean window_fingerprint_schedule_retry(gpointer data);
+
 static gpointer window_pw_wait(gpointer data) {
 	struct AuthRequest *request = data;
 	struct auth_session session;
@@ -163,7 +167,10 @@ static gpointer window_pw_wait(gpointer data) {
 		switch(ret) {
 			case PW_FAILURE:
 				auth_session_free(&session);
-				g_main_context_invoke(NULL, window_pw_failure, request);
+				if(!request->interactive && request->retries_remaining > 0)
+					g_main_context_invoke(NULL, window_fingerprint_schedule_retry, request);
+				else
+					g_main_context_invoke(NULL, window_pw_failure, request);
 				return NULL;
 			case PW_SUCCESS:
 				auth_session_free(&session);
@@ -199,21 +206,42 @@ void window_pw_check(GtkWidget *widget, gpointer data) {
 	request->password = g_strdup(gtk_entry_get_text((GtkEntry*)ctx->input_field));
 	request->service = "gtklock-password";
 	request->interactive = TRUE;
+	request->retries_remaining = 0;
 
 	window_set_busy(ctx, TRUE);
 	gtk_label_set_text(GTK_LABEL(ctx->error_label), NULL);
 	g_thread_new(NULL, window_pw_wait, request);
 }
 
-void window_fingerprint_check(gpointer data) {
-	struct Window *ctx = data;
+static void window_fingerprint_check_with_retries(struct Window *ctx, guint retries_remaining) {
 	struct AuthRequest *request = g_malloc0(sizeof(struct AuthRequest));
 	request->ctx = ctx;
 	request->password = g_strdup("");
 	request->service = "gtklock-fingerprint";
 	request->interactive = FALSE;
+	request->retries_remaining = retries_remaining;
 
 	g_thread_new(NULL, window_pw_wait, request);
+}
+
+static gboolean window_fingerprint_retry(gpointer data) {
+	struct AuthRequest *request = data;
+	struct Window *ctx = request->ctx;
+	guint retries_remaining = request->retries_remaining - 1;
+
+	g_free(request->password);
+	g_free(request);
+	window_fingerprint_check_with_retries(ctx, retries_remaining);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean window_fingerprint_schedule_retry(gpointer data) {
+	g_timeout_add_seconds(1, window_fingerprint_retry, data);
+	return G_SOURCE_REMOVE;
+}
+
+void window_fingerprint_check(gpointer data) {
+	window_fingerprint_check_with_retries(data, 30);
 }
 
 static void window_pw_set_vis(GtkEntry* entry, gboolean visibility) {

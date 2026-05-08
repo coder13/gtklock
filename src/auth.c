@@ -6,9 +6,11 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <signal.h>
 #include <unistd.h>
 #include <pwd.h>
 #include <fcntl.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <security/pam_appl.h>
 
@@ -153,6 +155,8 @@ enum pwcheck auth_session_check(struct auth_session *session, const char *servic
 			return PW_WAIT;
 		}
 		else if(session->pid == 0) {
+			prctl(PR_SET_PDEATHSIG, SIGTERM);
+			if(getppid() == 1) exit(EXIT_FAILURE);
 			close(session->err_pipe[PIPE_PARENT]);
 			close(session->out_pipe[PIPE_PARENT]);
 			freopen("/dev/null", "r", stdin);
