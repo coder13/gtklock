@@ -112,8 +112,25 @@ static gboolean signal_handler(gpointer data) {
 	return FALSE;
 }
 
+static gboolean lid_is_closed(void) {
+	gchar *contents = NULL;
+	gsize len = 0;
+	gboolean closed = FALSE;
+
+	if(g_file_get_contents("/proc/acpi/button/lid/LID0/state", &contents, &len, NULL)) {
+		closed = g_strrstr(contents, "closed") != NULL;
+		g_free(contents);
+	}
+
+	return closed;
+}
+
 static gboolean fingerprint_unlock_handler(gpointer data) {
 	struct GtkLock *gtklock = data;
+
+	if(g_getenv("GTKLOCK_AUTO_AUTH_AFTER_LID_OPEN") != NULL && lid_is_closed())
+		return G_SOURCE_CONTINUE;
+
 	if(gtklock->focused_window != NULL)
 		window_pw_check(NULL, gtklock->focused_window);
 	return G_SOURCE_REMOVE;
@@ -127,7 +144,9 @@ static void locked(GtkSessionLockLock *lock, void *data) {
 	module_on_locked(gtklock);
 	if(gtklock->parent > 0) kill(gtklock->parent, SIGUSR2);
 	if(gtklock->lock_command) exec_command(gtklock->lock_command);
-	if(g_getenv("GTKLOCK_DISABLE_AUTO_AUTH") == NULL)
+	if(g_getenv("GTKLOCK_AUTO_AUTH_AFTER_LID_OPEN") != NULL)
+		g_timeout_add_seconds(1, fingerprint_unlock_handler, gtklock);
+	else if(g_getenv("GTKLOCK_DISABLE_AUTO_AUTH") == NULL)
 		g_idle_add(fingerprint_unlock_handler, gtklock);
 	return;
 }
