@@ -15,6 +15,11 @@
 #include "auth.h"
 #include "module.h"
 
+#define FINGERPRINT_AUTH_RETRIES 30
+
+static const char *FINGERPRINT_SERVICE = "gtklock-fingerprint";
+static const char *PASSWORD_SERVICE = "gtklock-password";
+
 extern struct GtkLock *gtklock;
 
 struct AuthRequest {
@@ -204,7 +209,7 @@ void window_pw_check(GtkWidget *widget, gpointer data) {
 	struct AuthRequest *request = g_malloc0(sizeof(struct AuthRequest));
 	request->ctx = ctx;
 	request->password = g_strdup(gtk_entry_get_text((GtkEntry*)ctx->input_field));
-	request->service = "gtklock-password";
+	request->service = PASSWORD_SERVICE;
 	request->interactive = TRUE;
 	request->retries_remaining = 0;
 
@@ -217,7 +222,7 @@ static void window_fingerprint_check_with_retries(struct Window *ctx, guint retr
 	struct AuthRequest *request = g_malloc0(sizeof(struct AuthRequest));
 	request->ctx = ctx;
 	request->password = g_strdup("");
-	request->service = "gtklock-fingerprint";
+	request->service = FINGERPRINT_SERVICE;
 	request->interactive = FALSE;
 	request->retries_remaining = retries_remaining;
 
@@ -241,7 +246,7 @@ static gboolean window_fingerprint_schedule_retry(gpointer data) {
 }
 
 void window_fingerprint_check(gpointer data) {
-	window_fingerprint_check_with_retries(data, 30);
+	window_fingerprint_check_with_retries(data, FINGERPRINT_AUTH_RETRIES);
 }
 
 static void window_pw_set_vis(GtkEntry* entry, gboolean visibility) {

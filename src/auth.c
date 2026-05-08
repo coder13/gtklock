@@ -38,10 +38,14 @@ void auth_session_init(struct auth_session *session) {
 }
 
 void auth_session_free(struct auth_session *session) {
-	if(session->error_string) free(session->error_string);
-	if(session->message_string) free(session->message_string);
-	session->error_string = NULL;
-	session->message_string = NULL;
+	if(session->error_string) {
+		free(session->error_string);
+		session->error_string = NULL;
+	}
+	if(session->message_string) {
+		free(session->message_string);
+		session->message_string = NULL;
+	}
 
 	if(session->pid >= 0) {
 		close(session->err_pipe[PIPE_PARENT]);
